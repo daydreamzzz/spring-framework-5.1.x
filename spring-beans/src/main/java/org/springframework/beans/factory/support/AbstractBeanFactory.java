@@ -240,6 +240,7 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 			String name, @Nullable Class<T> requiredType, @Nullable Object[] args, boolean typeCheckOnly)
 			throws BeansException {
 
+		// 转换beanName, 因为factoryBean会多一个&, 另外，还需要判断别名
 		String beanName = transformedBeanName(name);
 		Object bean;
 
@@ -288,17 +289,23 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 			}
 
 			if (!typeCheckOnly) {
+				// 标记beanDefinition已经创建过
+				// 同时从合并的beanDefinition列表中移除
+				// 为什么需要移除？ 因为上面有过一次执行bean后置处理器的过程，可能在其中对其进行了修改
 				markBeanAsCreated(beanName);
 			}
 
 			try {
+				// 合并beanDefinition
 				RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName);
 				checkMergedBeanDefinition(mbd, beanName, args);
 
 				// Guarantee initialization of beans that the current bean depends on.
+				// 判断是否有dependsOn的情况
 				String[] dependsOn = mbd.getDependsOn();
 				if (dependsOn != null) {
 					for (String dep : dependsOn) {
+						// 出现循环依赖， 循环dependsOn
 						if (isDependent(beanName, dep)) {
 							throw new BeanCreationException(mbd.getResourceDescription(), beanName,
 									"Circular depends-on relationship between '" + beanName + "' and '" + dep + "'");
@@ -314,8 +321,14 @@ public abstract class AbstractBeanFactory extends FactoryBeanRegistrySupport imp
 					}
 				}
 
+				// 根据不同的scope使用不同的方式来创建bean
 				// Create bean instance.
 				if (mbd.isSingleton()) {
+					// 如果scope是单例的， 进入这里
+
+					// 点进去getSingleton可以看到实际参数结构是： getSingleton(String beanName, ObjectFactory<?> singletonFactory)
+					// 也就是将一个lambda表达式作为ObjectFactory参数传到这个方法内
+					// 在getSingleton方法内调用ObjectFactory调用objectFactory的方法即代表调用这里的createBean方法
 					sharedInstance = getSingleton(beanName, () -> {
 						try {
 							return createBean(beanName, mbd, args);

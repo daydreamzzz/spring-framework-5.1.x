@@ -236,6 +236,7 @@ final class PostProcessorRegistrationDelegate {
 	public static void registerBeanPostProcessors(
 			ConfigurableListableBeanFactory beanFactory, AbstractApplicationContext applicationContext) {
 
+		// 拿到bean的后置处理器， beanPostProcessor, 如果没有自定义的, 到这一步的时候只能拿到spring内置的两个， AutowiredAnnotationProcessor,  CommonAnnotationProcessor
 		String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanPostProcessor.class, true, false);
 
 		// Register BeanPostProcessorChecker that logs an info message when

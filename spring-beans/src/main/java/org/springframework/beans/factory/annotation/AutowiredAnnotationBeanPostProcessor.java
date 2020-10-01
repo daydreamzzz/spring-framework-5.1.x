@@ -270,6 +270,7 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 		}
 
 		// Quick check on the concurrent map first, with minimal locking.
+		// 一个简单的double check, 先从缓存中拿，拿不到再推断， 推断出来的放入缓存
 		Constructor<?>[] candidateConstructors = this.candidateConstructorsCache.get(beanClass);
 		if (candidateConstructors == null) {
 			// Fully synchronized resolution now...
@@ -278,6 +279,7 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 				if (candidateConstructors == null) {
 					Constructor<?>[] rawCandidates;
 					try {
+						// 拿到当前类的所有构造方法，如果没有提供任何构造方法， 也会返回一个无参构造方法
 						rawCandidates = beanClass.getDeclaredConstructors();
 					}
 					catch (Throwable ex) {
@@ -285,11 +287,19 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 								"Resolution of declared constructors on bean Class [" + beanClass.getName() +
 								"] from ClassLoader [" + beanClass.getClassLoader() + "] failed", ex);
 					}
+
+					// 存放所有被筛选出来的构造方法， 可以看成用来存放所有加了@Autowried注解的构造方法
 					List<Constructor<?>> candidates = new ArrayList<>(rawCandidates.length);
+					// 可以把这里的requiredConstructor当成一个标识符， 如果出现一个加了@Autowried注解的情况，这个值被赋值
+					// 第二次循环的时候，判断这个值是否有值，如果此时又出现一个加了@Autowried注解的构造方法，spring就会抛出一个异常
 					Constructor<?> requiredConstructor = null;
+					// 这个defaultConstructor用来表示默认的构造方法， 如果一个构造方法没有加@Autowried且是一个无参的构造方法, 这个参数就会被赋值
 					Constructor<?> defaultConstructor = null;
+					// 是Kotlin类的情况下才有效， 在java环境下返回null, 这里可以不考虑
 					Constructor<?> primaryConstructor = BeanUtils.findPrimaryConstructor(beanClass);
+					// 和primaryConstructor配合使用，也不用管.  下方所有与这两个变量相关的内容都不用管
 					int nonSyntheticConstructors = 0;
+
 					for (Constructor<?> candidate : rawCandidates) {
 						if (!candidate.isSynthetic()) {
 							nonSyntheticConstructors++;
@@ -297,11 +307,16 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 						else if (primaryConstructor != null) {
 							continue;
 						}
+
+						// 判断当前构造方法是否加了@Autowried注解,
+						// 如果没加, 返回值为空
+						// 如果加了, 返回值中会多一个值 required:true
 						AnnotationAttributes ann = findAutowiredAnnotation(candidate);
 						if (ann == null) {
 							Class<?> userClass = ClassUtils.getUserClass(beanClass);
 							if (userClass != beanClass) {
 								try {
+									// 如果子类的构造方法上没有加@Autowried, 从其父类的构造方法找是否加了此注解
 									Constructor<?> superCtor =
 											userClass.getDeclaredConstructor(candidate.getParameterTypes());
 									ann = findAutowiredAnnotation(superCtor);
@@ -312,12 +327,18 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 							}
 						}
 						if (ann != null) {
+
+							// requiredConstructor在下面赋值
+							// 如果出现多个加了@Autowried注解的构造方法, spring无法判断具体使用哪一个
+							// 所以这里会抛异常
 							if (requiredConstructor != null) {
 								throw new BeanCreationException(beanName,
 										"Invalid autowire-marked constructor: " + candidate +
 										". Found constructor with 'required' Autowired annotation already: " +
 										requiredConstructor);
 							}
+
+							// 获取加了@Autowried注解的构造方法的返回值， 这里默认为true， 可以使用@Autowried(required = false)进行更改
 							boolean required = determineRequiredStatus(ann);
 							if (required) {
 								if (!candidates.isEmpty()) {
@@ -331,13 +352,24 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 							candidates.add(candidate);
 						}
 						else if (candidate.getParameterCount() == 0) {
+							// 如果构造方法没有加@Autowried， 并且没有参数
 							defaultConstructor = candidate;
 						}
 					}
 					if (!candidates.isEmpty()) {
+						// !candidates.isEmpty()，需要的条件是
+						// 情形1: 只存在一个加了@Autowried(required = true)的方法， 由于@Aurowried注解里的required默认为true， 也可以认为只存在一个加了@Autowried的构造方法
+						// 情形2: 如果存在多个加了@Autowried注解的方法， 必须将所有的required设置为false, 即@Autowried(required = false)
+
 						// Add default constructor to list of optional constructors, as fallback.
 						if (requiredConstructor == null) {
+							// requiredConstructor == null, 需要的条件是， 必须存在一个@Autowried(required = true)的构造方法
+
 							if (defaultConstructor != null) {
+								// 必须存在一个无参的构造方法，且这个无参的构造方法不能加@Autowried注解
+
+								// 结合上面的两个if条件， 进入这里的情况可以总结为，必须存在两个构造方法
+								// 1个未加@Autowried注解的无参构造方法， 1个加了@Autowried且required=true的有参构造方法
 								candidates.add(defaultConstructor);
 							}
 							else if (candidates.size() == 1 && logger.isInfoEnabled()) {
@@ -347,25 +379,60 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 										"default constructor to fall back to: " + candidates.get(0));
 							}
 						}
+
+						// 这里经过上面的判断，只会出现三种情况
+						// 1. 存在一个加了@Autowired(required=true)的构造方法
+						// 2. 存在多个加了@Autowired(required=false)的构造方法
+						// 3. 存在多个加了@Autowired(required=false)+1个无参构造方法
 						candidateConstructors = candidates.toArray(new Constructor<?>[0]);
 					}
+
 					else if (rawCandidates.length == 1 && rawCandidates[0].getParameterCount() > 0) {
+						// candidates为空，则表示没有一个构造方法添加了@Autowried
+						// rawCandidates == 1表示只有一个构造方法
+						// 构造方法的参数大于0
+						// 总结： 进入这里的条件，只在一个没有加@Autowried注解，满足这些条件， spring直接使用这个构造方法
 						candidateConstructors = new Constructor<?>[] {rawCandidates[0]};
 					}
+
 					else if (nonSyntheticConstructors == 2 && primaryConstructor != null &&
 							defaultConstructor != null && !primaryConstructor.equals(defaultConstructor)) {
+						// 和Kotlin有关， 不考虑
 						candidateConstructors = new Constructor<?>[] {primaryConstructor, defaultConstructor};
 					}
 					else if (nonSyntheticConstructors == 1 && primaryConstructor != null) {
 						candidateConstructors = new Constructor<?>[] {primaryConstructor};
 					}
+
+					// 如果不存在任何加了@Autowried注解的构造方法，存在多个构造方法
 					else {
+						// new一个空的Constructor数组
 						candidateConstructors = new Constructor<?>[0];
 					}
 					this.candidateConstructorsCache.put(beanClass, candidateConstructors);
 				}
 			}
 		}
+
+		// 总结一下determineCandidateConstructors这个方法到底在做什么？
+		// 这个方法通过循环BeanPostProcessor调用而来, 当前类AutowiredAnnotationBeanPostProcessor仅仅是其中之一的实现
+		// 从名字上也可以看出来， AutowiredAnnotationBeanPostProcessor仅处理与@Autowried相关的情况， 其他情况，由其他符合条件的后置处理器来处理
+		//
+		// 从代码逻辑上来看，分为以下几种情况
+		// 加了@Autowried的情况：
+		// 		1. 只能有一个@Autowired(required=true)的构造方法(有多个会报错)，如果是这种情况，直接返回这个加了@Autowired(required=true)的
+		//    		- 有一个@Autowired(required = true)的情况下， 有其他@Autowried(required = false), 也会报错
+		// 		2. 存在多个@Autowired(required=false)的构造方法, 这里有不同的情况
+		//     		- 多个加了@Autowired(required=false)的， 返回这些加了@Autowired(required=false)的
+		//     		- 多个加了@Autowired(required=false)的和一些未加@Autowired(required=false)的，  只返回加了@Autowired(required=false)的
+		//    		- 多个加了@Autowired(required=false)的和一个无参的，  返回加了@Autowried+无参的
+		// 没加@Autowried：
+		//		3. 只有一个有参构造方法， 直接返回
+		//      4. 有多个构造方法， 返回null
+		//
+		//
+		// 再次总结: 这里仅仅是找出所有可用的构造方法， 有可能会返回多个， 具体使用其中哪一个，如何使用，都是交由后面的代码处理
+		// 程序员想要手动控制也可以通过@Autowried注解来配置， 不过这已经不是这个方法所需要考虑的事情了
 		return (candidateConstructors.length > 0 ? candidateConstructors : null);
 	}
 
