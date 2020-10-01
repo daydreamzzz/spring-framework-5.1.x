@@ -106,6 +106,8 @@ class ConfigurationClassEnhancer {
 			}
 			return configClass;
 		}
+
+		// 根据newEnhancer()返回的cglib实例创建一个代理类， 这里的关键在newEnhancer()中
 		Class<?> enhancedClass = createClass(newEnhancer(configClass, classLoader));
 		if (logger.isTraceEnabled()) {
 			logger.trace(String.format("Successfully enhanced %s; enhanced class name is: %s",
@@ -120,10 +122,14 @@ class ConfigurationClassEnhancer {
 	private Enhancer newEnhancer(Class<?> configSuperClass, @Nullable ClassLoader classLoader) {
 		Enhancer enhancer = new Enhancer();
 		enhancer.setSuperclass(configSuperClass);
+		// EnhancedConfiguration实现了BeanFactoryAware接口，这里需要一个实现了BeanFactoryAware接口的意义在于， 需要在这里获取beanFactory
 		enhancer.setInterfaces(new Class<?>[] {EnhancedConfiguration.class});
 		enhancer.setUseFactory(false);
 		enhancer.setNamingPolicy(SpringNamingPolicy.INSTANCE);
 		enhancer.setStrategy(new BeanFactoryAwareGeneratorStrategy(classLoader));
+		// 这里的关键在CALLBACK_FILTER里面的Callback[], 里面有BeanMethodInterceptor, BeanFactoryAwareMethodInterceptor两个callback.
+		// BeanMethodInterceptor是对目标方法的代理
+		// eanFactoryAwareMethodInterceptor是在代理类中增加了一个BeanFactory属性，属性名为$$beanFactory， 例： private BeanFactory $$beanFactory;
 		enhancer.setCallbackFilter(CALLBACK_FILTER);
 		enhancer.setCallbackTypes(CALLBACK_FILTER.getCallbackTypes());
 		return enhancer;

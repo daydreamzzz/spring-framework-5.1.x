@@ -250,6 +250,7 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			processConfigBeanDefinitions((BeanDefinitionRegistry) beanFactory);
 		}
 
+		// 增强配置类，如果full配置类(加了@Configuration注解的类)，会使用cglib代理配置类
 		enhanceConfigurationClasses(beanFactory);
 		beanFactory.addBeanPostProcessor(new ImportAwareBeanPostProcessor(beanFactory));
 	}
@@ -264,12 +265,19 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 
 		for (String beanName : candidateNames) {
 			BeanDefinition beanDef = registry.getBeanDefinition(beanName);
+			// 这里的full, lite判断是bd中的一个属性，在此处仅仅是为了重复验证而进行的判断
+			// 这个属性目前在此处一定为空，所以不会进if条件。 只有在下面的else if中checkConfigurationClassCandidate后才会为此属性设置值
 			if (ConfigurationClassUtils.isFullConfigurationClass(beanDef) ||
 					ConfigurationClassUtils.isLiteConfigurationClass(beanDef)) {
 				if (logger.isDebugEnabled()) {
 					logger.debug("Bean definition has already been processed as a configuration class: " + beanDef);
 				}
 			}
+
+			// 检验是否是配置类，这里最主要的是要判断是，是否加了配置类注解
+			// 第一类， 加了@Configuration注解
+			// 第二类， 加了@Component || @ComponentScan || @Import || @ImportResource
+			// 并且， 如果是第一类注解，会设置其中一个属性值为full, 如果是第二类注解，会设置这个属性值为lite
 			else if (ConfigurationClassUtils.checkConfigurationClassCandidate(beanDef, this.metadataReaderFactory)) {
 				configCandidates.add(new BeanDefinitionHolder(beanDef, beanName));
 			}
@@ -309,9 +317,12 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 				this.metadataReaderFactory, this.problemReporter, this.environment,
 				this.resourceLoader, this.componentScanBeanNameGenerator, registry);
 
+		// 这个set仅仅是为了去重， 因为set里面不能放重复元素
 		Set<BeanDefinitionHolder> candidates = new LinkedHashSet<>(configCandidates);
+		// 这个set用来装已经解析过的配置类
 		Set<ConfigurationClass> alreadyParsed = new HashSet<>(configCandidates.size());
 		do {
+			// 这个parse非常关键! 会处理所有配置类里面的相关注解, @import这个关键扩展点也在这里解析
 			parser.parse(candidates);
 			parser.validate();
 
@@ -324,6 +335,8 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 						registry, this.sourceExtractor, this.resourceLoader, this.environment,
 						this.importBeanNameGenerator, parser.getImportRegistry());
 			}
+
+			// 关键! ImportBeanDefinitionRegistrar是在这里处理的
 			this.reader.loadBeanDefinitions(configClasses);
 			alreadyParsed.addAll(configClasses);
 
@@ -372,6 +385,8 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 		for (String beanName : beanFactory.getBeanDefinitionNames()) {
 			BeanDefinition beanDef = beanFactory.getBeanDefinition(beanName);
 			if (ConfigurationClassUtils.isFullConfigurationClass(beanDef)) {
+				// 什么样的类是全配置类, full configuration class?
+				// 加了@Configuration注解的类
 				if (!(beanDef instanceof AbstractBeanDefinition)) {
 					throw new BeanDefinitionStoreException("Cannot enhance @Configuration bean definition '" +
 							beanName + "' since it is not stored in an AbstractBeanDefinition subclass");
@@ -390,6 +405,9 @@ public class ConfigurationClassPostProcessor implements BeanDefinitionRegistryPo
 			return;
 		}
 
+		// 如果配置类加了@Configuration注解， 就对这个类实行增强，使用cglib代理这个类
+		// 为什么需要代理？
+		// 主要原因是为了解决，如果在配置类配置了@Bean注解的情况，对bean的作用域产生影响的问题
 		ConfigurationClassEnhancer enhancer = new ConfigurationClassEnhancer();
 		for (Map.Entry<String, AbstractBeanDefinition> entry : configBeanDefs.entrySet()) {
 			AbstractBeanDefinition beanDef = entry.getValue();

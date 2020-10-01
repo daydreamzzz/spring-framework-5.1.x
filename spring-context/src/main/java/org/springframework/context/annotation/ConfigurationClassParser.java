@@ -260,10 +260,12 @@ class ConfigurationClassParser {
 
 		if (configClass.getMetadata().isAnnotated(Component.class.getName())) {
 			// Recursively process any member (nested) classes first
+			// 解析内部类
 			processMemberClasses(configClass, sourceClass);
 		}
 
 		// Process any @PropertySource annotations
+		// PropertySource是用来干嘛的？ TODO
 		for (AnnotationAttributes propertySource : AnnotationConfigUtils.attributesForRepeatable(
 				sourceClass.getMetadata(), PropertySources.class,
 				org.springframework.context.annotation.PropertySource.class)) {
@@ -277,6 +279,7 @@ class ConfigurationClassParser {
 		}
 
 		// Process any @ComponentScan annotations
+		// 处理所有@ComponentScan注解
 		Set<AnnotationAttributes> componentScans = AnnotationConfigUtils.attributesForRepeatable(
 				sourceClass.getMetadata(), ComponentScans.class, ComponentScan.class);
 		if (!componentScans.isEmpty() &&
@@ -291,7 +294,11 @@ class ConfigurationClassParser {
 					if (bdCand == null) {
 						bdCand = holder.getBeanDefinition();
 					}
+
+					// 判断扫描出来的类是否是配置类，根据@ComponentScan扫描出来的规则(带@Component注解)，这里一定会进
 					if (ConfigurationClassUtils.checkConfigurationClassCandidate(bdCand, this.metadataReaderFactory)) {
+
+						// 解析扫描出来的类，然后会再次判断上面是否有@ComponentScan注解，循环解析(递归调用)
 						parse(bdCand.getBeanClassName(), holder.getBeanName());
 					}
 				}
@@ -299,9 +306,11 @@ class ConfigurationClassParser {
 		}
 
 		// Process any @Import annotations
+		// 处理@Import注解， getImports可以获取配置类上@Import里面的值
 		processImports(configClass, sourceClass, getImports(sourceClass), true);
 
 		// Process any @ImportResource annotations
+		// 处理@ImportResource注解， @ImportResource什么时候会用，在配置类里面引入其他地方的配置，比如，我们可以在配置类里面引入xml配置, 如： @ImportResource("spring.xml");
 		AnnotationAttributes importResource =
 				AnnotationConfigUtils.attributesFor(sourceClass.getMetadata(), ImportResource.class);
 		if (importResource != null) {
@@ -555,16 +564,30 @@ class ConfigurationClassParser {
 				for (SourceClass candidate : importCandidates) {
 					if (candidate.isAssignable(ImportSelector.class)) {
 						// Candidate class is an ImportSelector -> delegate to it to determine imports
+						// 如果@Import里面的值是ImportSelector类型
+						// 先获取class
 						Class<?> candidateClass = candidate.loadClass();
+
+						// 反射通过class实例化对象
 						ImportSelector selector = BeanUtils.instantiateClass(candidateClass, ImportSelector.class);
 						ParserStrategyUtils.invokeAwareMethods(
 								selector, this.environment, this.resourceLoader, this.registry);
 						if (selector instanceof DeferredImportSelector) {
+
+							// 如果importSelector是DeferredImportSelector类型， 则将import的值添加到deferredImportSelectors这个list中去
+							// 实际上，通过类结构来看DeferredImportSelector是importSelector的子类， 是延迟加载的importSelector.
+							// 如果是DeferredImportSelector，这里只是先加载到一个list中去，这里先不执行
 							this.deferredImportSelectorHandler.handle(configClass, (DeferredImportSelector) selector);
 						}
 						else {
+
+							// 如果不是延迟加载的importSelector, 这里就会将importSelector里面的selectImports方法执行一遍
+							// 拿到通过selectImports方法传过来的类名数组
 							String[] importClassNames = selector.selectImports(currentSourceClass.getMetadata());
 							Collection<SourceClass> importSourceClasses = asSourceClasses(importClassNames);
+
+							// 这里是循环调用，因为importSelector传过来的类方法名数组，最后也要变成bean被spring所管理
+							// 这里再次调用，防止importSelector传过来的类上面也加了@import注解
 							processImports(configClass, currentSourceClass, importSourceClasses, false);
 						}
 					}
@@ -583,6 +606,8 @@ class ConfigurationClassParser {
 						// process it as an @Configuration class
 						this.importStack.registerImport(
 								currentSourceClass.getMetadata(), candidate.getMetadata().getClassName());
+
+						// 这里是真正处理@import值的方法， 和其他的配置类同样的处理逻辑
 						processConfigurationClass(candidate.asConfigClass(configClass));
 					}
 				}

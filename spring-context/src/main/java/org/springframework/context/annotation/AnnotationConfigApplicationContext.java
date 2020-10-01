@@ -63,7 +63,16 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	 * through {@link #register} calls and then manually {@linkplain #refresh refreshed}.
 	 */
 	public AnnotationConfigApplicationContext() {
+		// 这里首先执行父类的构构造方法，初始化一个beanFactory, 原始代码： this.beanFactory = new DefaultListableBeanFactory();
+
+		// 1. 实例一个reader, 这个reader可以看成是一个beanDefinition注册器, 可以将某个类注册为beanDefinition
+		//    reader.register(Appconfig.class)
+		// 2. 这里面会生成5个spring自己提供的beanDefinition
 		this.reader = new AnnotatedBeanDefinitionReader(this);
+
+		// 实例一个扫描器, 通过这个扫描器程序员可以调用AnnotationConfigApplicationContext.scan()这个api传入需要扫描的包路径
+		// 这里实例出来的这个， 即this.scanner 仅仅用来处理这个api
+		// 而@ComponentScan 这个注解的扫描，不是通过这里实例的this.scanner来完成的， spring会另外new一个出来用于扫描
 		this.scanner = new ClassPathBeanDefinitionScanner(this);
 	}
 
@@ -84,8 +93,15 @@ public class AnnotationConfigApplicationContext extends GenericApplicationContex
 	 * {@link Configuration @Configuration} classes
 	 */
 	public AnnotationConfigApplicationContext(Class<?>... componentClasses) {
+		// 实例化一个AnnotatedBeanDefinitionReader和ClassPathBeanDefinitionScanner
+		// 完成内置后置处理器的注入
 		this();
+
+		// 将程序员提供的配置类，作为一个AnnotatedGenericBeanDefinition进行注册
 		register(componentClasses);
+
+		// 到这一步，spring已经存在了几个beanDefinition， 有spring内置的5个， 还有程序员提供的appConfig(可能存在多个)
+		// 这里的refresh(), 可以理解为解析为去解析这些beanDefinition
 		refresh();
 	}
 

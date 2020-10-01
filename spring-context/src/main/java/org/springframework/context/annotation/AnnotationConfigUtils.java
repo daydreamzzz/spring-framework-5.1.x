@@ -148,6 +148,7 @@ public abstract class AnnotationConfigUtils {
 	public static Set<BeanDefinitionHolder> registerAnnotationConfigProcessors(
 			BeanDefinitionRegistry registry, @Nullable Object source) {
 
+		// 这里的DefaultListableBeanFactory来自于父类GenericApplicationContext中，调用子类的构造方法时会先调用父类的构造方法
 		DefaultListableBeanFactory beanFactory = unwrapDefaultListableBeanFactory(registry);
 		if (beanFactory != null) {
 			if (!(beanFactory.getDependencyComparator() instanceof AnnotationAwareOrderComparator)) {
@@ -160,6 +161,19 @@ public abstract class AnnotationConfigUtils {
 
 		Set<BeanDefinitionHolder> beanDefs = new LinkedHashSet<>(8);
 
+
+		/**
+		 * 此处往下， 在DefaultListableBeanFactory类的
+		 * Map<String, BeanDefinition> beanDefinitionMap中放入5个值，key为beanName, value为bean. 分别是
+		 * ConfigurationClassPostProcessor
+		 * AutowiredAnnotationBeanPostProcessor
+		 * CommonAnnotationBeanPostProcessor
+		 * DefaultEventListenerFactory
+		 * EventListenerMethodProcessor
+		 *
+		 * List<String> beanDefinitionNames中放入bean的名称
+		 *
+		 */
 		if (!registry.containsBeanDefinition(CONFIGURATION_ANNOTATION_PROCESSOR_BEAN_NAME)) {
 			RootBeanDefinition def = new RootBeanDefinition(ConfigurationClassPostProcessor.class);
 			def.setSource(source);
