@@ -240,12 +240,23 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport
 		return wrapIfNecessary(bean, beanName, cacheKey);
 	}
 
+
+	/**
+	 *
+	 *
+	 * 这个方法在这里主要是进行初步筛选了一遍， 这这里会找出符合条件的，需要被代理的bean， 将其放到 advisedBeans 这个map容器中
+	 * 后续的处理中，直接循环这个容器，遍历其中的元素，然后再对符合要求的bean使用AOP代理
+	 *
+	 * 当然，这个方法有一个前提条件，是否存在TargetSource, 如果我们提供了自己实现的targetSouce扩展类，就用我们提供的方法直接在这里返回代理类
+	 */
 	@Override
 	public Object postProcessBeforeInstantiation(Class<?> beanClass, String beanName) {
+		// cacheKey其实就是beanName, 如果是factoryBean就加上'&'号， 否则直接返回beanName
 		Object cacheKey = getCacheKey(beanClass, beanName);
 
 		if (!StringUtils.hasLength(beanName) || !this.targetSourcedBeans.contains(beanName)) {
 			if (this.advisedBeans.containsKey(cacheKey)) {
+				// 如果已经在advisedBeans中，直接返回空
 				return null;
 			}
 			if (isInfrastructureClass(beanClass) || shouldSkip(beanClass, beanName)) {
@@ -253,6 +264,8 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport
 				return null;
 			}
 		}
+
+		// TargetSource是一个扩展点，如果没有指定targetSource, 则下面的内容不会进 TODO
 
 		// Create proxy here if we have a custom TargetSource.
 		// Suppresses unnecessary default instantiation of the target bean:

@@ -567,6 +567,11 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		synchronized (mbd.postProcessingLock) {
 			if (!mbd.postProcessed) {
 				try {
+					// 2. 第二次调用后置处理器
+					// 实现类有多个，如AutowiredAnnotationBeanPostProcessor, CommonAnnotationBeanPostProcessor等
+					// 例:
+					// 如果是如AutowiredAnnotationBeanPostProcessor， 会找到加了@Autowried相关的注入点(方法，属性等需要被自动注入的店)，放到一个容器中
+					// 如果是如CommonAnnotationBeanPostProcessor, 会找到@Resource相关的注入点(方法，属性等需要被自动注入的店)，放到一个容器中
 					applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
 				}
 				catch (Throwable ex) {
@@ -588,7 +593,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 				logger.trace("Eagerly caching bean '" + beanName +
 						"' to allow for resolving potential circular references");
 			}
+
+			// 3. 第三次调用后置处理器
 			// 这个时候的bean已经实例化完成，但是还没有属性填充
+			// 如果设置了代理，则会在这个后置处理器中返回代理过后的类
 			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
 		}
 
