@@ -67,6 +67,7 @@ public class InjectionMetadata {
 		Set<InjectedElement> checkedElements = new LinkedHashSet<>(this.injectedElements.size());
 		for (InjectedElement element : this.injectedElements) {
 			Member member = element.getMember();
+			// 判断当前注入点是否在externallyManagedConfigMembers这个集合中，如果不在，就放到这个集合里面去
 			if (!beanDefinition.isExternallyManagedConfigMember(member)) {
 				beanDefinition.registerExternallyManagedConfigMember(member);
 				checkedElements.add(element);
@@ -75,6 +76,7 @@ public class InjectionMetadata {
 				}
 			}
 		}
+		// checkedElements表示哪些注入点经过了!isExternallyManagedConfigMember验证
 		this.checkedElements = checkedElements;
 	}
 
@@ -83,10 +85,13 @@ public class InjectionMetadata {
 		Collection<InjectedElement> elementsToIterate =
 				(checkedElements != null ? checkedElements : this.injectedElements);
 		if (!elementsToIterate.isEmpty()) {
+			// 开始遍历并进行注入
 			for (InjectedElement element : elementsToIterate) {
 				if (logger.isTraceEnabled()) {
 					logger.trace("Processing injected element of bean '" + beanName + "': " + element);
 				}
+
+				// element是一个包装类型， 可能是Method， 也可能是Field
 				element.inject(target, beanName, pvs);
 			}
 		}
@@ -174,16 +179,22 @@ public class InjectionMetadata {
 		protected void inject(Object target, @Nullable String requestingBeanName, @Nullable PropertyValues pvs)
 				throws Throwable {
 
+			// 如果是属性，直接通过反射进行赋值 field.set()
 			if (this.isField) {
 				Field field = (Field) this.member;
 				ReflectionUtils.makeAccessible(field);
 				field.set(target, getResourceToInject(target, requestingBeanName));
 			}
 			else {
+				// 检查当前的属性是不是通过by_name和by_type来注入的
 				if (checkPropertySkipping(pvs)) {
 					return;
 				}
 				try {
+					// 如果是方法，通过反射方法调用进行赋值
+					// 这里的方法不一定要setXXX方法
+					// spring严格意义上来说，希望的是在一个setXX方法上添加一个@Autowried等注解，然后用来进行参数赋值
+					// 实际上这里只是对加了注解的方法进行了一次方法调用而已
 					Method method = (Method) this.member;
 					ReflectionUtils.makeAccessible(method);
 					method.invoke(target, getResourceToInject(target, requestingBeanName));

@@ -345,6 +345,8 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport
 	 * @return a proxy wrapping the bean, or the raw bean instance as-is
 	 */
 	protected Object wrapIfNecessary(Object bean, String beanName, Object cacheKey) {
+		// 不符合代理条件的bean， 直接返回
+
 		if (StringUtils.hasLength(beanName) && this.targetSourcedBeans.contains(beanName)) {
 			return bean;
 		}
@@ -360,6 +362,8 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport
 		Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
 		if (specificInterceptors != DO_NOT_PROXY) {
 			this.advisedBeans.put(cacheKey, Boolean.TRUE);
+
+			// 创建AOP代理
 			Object proxy = createProxy(
 					bean.getClass(), beanName, specificInterceptors, new SingletonTargetSource(bean));
 			this.proxyTypes.put(cacheKey, proxy.getClass());
@@ -481,6 +485,8 @@ public abstract class AbstractAutoProxyCreator extends ProxyProcessorSupport
 			proxyFactory.setPreFiltered(true);
 		}
 
+		// 创建AOP代理类， 会根据不同的条件使用不同的创建类(jdk动态代理， cglib) 来创建代理对象
+		// 默认使用jdk动态代理，可以通过不同的方式指定使用cglib进行代理， 如指定proxyTargetClass = true等, 即@EnableAspectJAutoProxy(proxyTargetClass = true)
 		return proxyFactory.getProxy(getProxyClassLoader());
 	}
 

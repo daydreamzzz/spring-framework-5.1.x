@@ -439,6 +439,7 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 
 	@Override
 	public PropertyValues postProcessProperties(PropertyValues pvs, Object bean, String beanName) {
+		// InjectionMetadata包含了所有需要注入的属性方法, 在第三次后置处理中已经找出来了， 所以这里find可以直接从缓存中拿到
 		InjectionMetadata metadata = findAutowiringMetadata(beanName, bean.getClass(), pvs);
 		try {
 			metadata.inject(bean, beanName, pvs);
@@ -486,6 +487,8 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 		// Fall back to class name as cache key, for backwards compatibility with custom callers.
 		String cacheKey = (StringUtils.hasLength(beanName) ? beanName : clazz.getName());
 		// Quick check on the concurrent map first, with minimal locking.
+
+		// 先从缓存中找一遍
 		InjectionMetadata metadata = this.injectionMetadataCache.get(cacheKey);
 		if (InjectionMetadata.needsRefresh(metadata, clazz)) {
 			synchronized (this.injectionMetadataCache) {
@@ -494,6 +497,8 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 					if (metadata != null) {
 						metadata.clear(pvs);
 					}
+
+					// 缓存中没有，从class中解析
 					metadata = buildAutowiringMetadata(clazz);
 					this.injectionMetadataCache.put(cacheKey, metadata);
 				}
@@ -503,26 +508,35 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 	}
 
 	private InjectionMetadata buildAutowiringMetadata(final Class<?> clazz) {
+		// 拿到所有加了(@Autowried || @Value || @Inject)注解的属性和方法， 封装到InjectionMetadata.injectedElements这个集合中
+		// 如果是属性，不能是静态的
+		// 如果是方法， 不能是静态的且方法参数值不能为0
+
 		List<InjectionMetadata.InjectedElement> elements = new ArrayList<>();
 		Class<?> targetClass = clazz;
 
 		do {
 			final List<InjectionMetadata.InjectedElement> currElements = new ArrayList<>();
-
+			// 遍历所有属性，判断是否加了@Autowried, @Value, @Inject注解
 			ReflectionUtils.doWithLocalFields(targetClass, field -> {
 				AnnotationAttributes ann = findAutowiredAnnotation(field);
 				if (ann != null) {
+					// 如果属性是static的，直接返回
 					if (Modifier.isStatic(field.getModifiers())) {
 						if (logger.isInfoEnabled()) {
 							logger.info("Autowired annotation is not supported on static fields: " + field);
 						}
 						return;
 					}
+					// 拿到required值， 如果是@Autowried注解，required默认是true, 如果是其他注解，没有required属性，也返回true
 					boolean required = determineRequiredStatus(ann);
+
+					// 将符合条件的属性字段，封装成一个AutowiredFieldElement, 存入集合
 					currElements.add(new AutowiredFieldElement(field, required));
 				}
 			});
 
+			// 遍历所有方法，判判断是否加了@Autowried, @Value, @Inject注解
 			ReflectionUtils.doWithLocalMethods(targetClass, method -> {
 				Method bridgedMethod = BridgeMethodResolver.findBridgedMethod(method);
 				if (!BridgeMethodResolver.isVisibilityBridgeMethodPair(method, bridgedMethod)) {
@@ -530,6 +544,7 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 				}
 				AnnotationAttributes ann = findAutowiredAnnotation(bridgedMethod);
 				if (ann != null && method.equals(ClassUtils.getMostSpecificMethod(method, clazz))) {
+					// 静态方法略过
 					if (Modifier.isStatic(method.getModifiers())) {
 						if (logger.isInfoEnabled()) {
 							logger.info("Autowired annotation is not supported on static methods: " + method);
@@ -542,8 +557,11 @@ public class AutowiredAnnotationBeanPostProcessor extends InstantiationAwareBean
 									method);
 						}
 					}
+					// 拿到required值
 					boolean required = determineRequiredStatus(ann);
+					// 根据方法找出对应的属性
 					PropertyDescriptor pd = BeanUtils.findPropertyForMethod(bridgedMethod, clazz);
+					// 封装成AutowiredMethodElement，放入集合
 					currElements.add(new AutowiredMethodElement(method, required, pd));
 				}
 			});

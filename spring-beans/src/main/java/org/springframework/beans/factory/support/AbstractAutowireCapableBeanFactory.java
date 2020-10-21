@@ -501,7 +501,9 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 
 		try {
 			// Give BeanPostProcessors a chance to return a proxy instead of the target bean instance.
-			// 1. 执行一个后置处理器, (实例化前)
+			// 1. 第一次执行后置处理器, (实例化前)
+			// 比如其中一个后置处理器 AbstractAutoProxyCreator中的postProcessBeforeInstantiation方法 会在这里初步筛选一遍需要进行AOP代理的类
+			// 放到一个容器中，后续不需要再对这个类进行解析，直接循环容器找出符合条件的进行代理即可
 			Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
 			if (bean != null) {
 				return bean;
@@ -567,8 +569,10 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		synchronized (mbd.postProcessingLock) {
 			if (!mbd.postProcessed) {
 				try {
-					// 2. 第二次调用后置处理器
-					// 实现类有多个，如AutowiredAnnotationBeanPostProcessor, CommonAnnotationBeanPostProcessor等
+					// 3. 第三次调用后置处理器
+					// 核心功能是找出所有需要注入的点，放到一个容器中，后续属性填充时，直接循环这个容器中的元素完成注入即可
+
+					// 如AutowiredAnnotationBeanPostProcessor, CommonAnnotationBeanPostProcessor等
 					// 例:
 					// 如果是如AutowiredAnnotationBeanPostProcessor， 会找到加了@Autowried相关的注入点(方法，属性等需要被自动注入的店)，放到一个容器中
 					// 如果是如CommonAnnotationBeanPostProcessor, 会找到@Resource相关的注入点(方法，属性等需要被自动注入的店)，放到一个容器中
@@ -594,9 +598,9 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 						"' to allow for resolving potential circular references");
 			}
 
-			// 3. 第三次调用后置处理器
+			// 4. 第四次调用后置处理器
 			// 这个时候的bean已经实例化完成，但是还没有属性填充
-			// 如果设置了代理，则会在这个后置处理器中返回代理过后的类
+			// 构造一个对象工厂添加到singletonFactories中
 			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
 		}
 
@@ -1158,7 +1162,9 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	 * @see #instantiateBean
 	 */
 	protected BeanWrapper createBeanInstance(String beanName, RootBeanDefinition mbd, @Nullable Object[] args) {
+
 		// Make sure bean class is actually resolved at this point.
+		// 得到bean的class，验证class的访问权限是不是public
 		Class<?> beanClass = resolveBeanClass(mbd, beanName);
 
 		if (beanClass != null && !Modifier.isPublic(beanClass.getModifiers()) && !mbd.isNonPublicAccessAllowed()) {
@@ -1206,6 +1212,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		// Candidate constructors for autowiring?
+		// 2. 第二次调用后置处理器
+		// 核心功能： 通过AutowiredAnnotationBeanPostProcessor中的determineCandidateConstructors方法，找出候选的构造方法
 		// 从beanPostProcessor中获取候选的构造方法
 		// 如果返回结果ctors不为空， 以下三种情况都回自动推断构造方法，并用其实例化bean
 		// 1. 如果注入模型是构造方法注入
@@ -1397,6 +1405,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		// Give any InstantiationAwareBeanPostProcessors the opportunity to modify the
 		// state of the bean before properties are set. This can be used, for example,
 		// to support styles of field injection.
+
+		// spring在这里提供了一个后置处理器扩展点，以便于让程序员自己决定是否要进行属性填充
 		if (!mbd.isSynthetic() && hasInstantiationAwareBeanPostProcessors()) {
 			for (BeanPostProcessor bp : getBeanPostProcessors()) {
 				if (bp instanceof InstantiationAwareBeanPostProcessor) {
@@ -1408,10 +1418,22 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			}
 		}
 
+		// 是否在BeanDefinition中共设置了属性值
+		// ps：这个值可以通过外部api进行设置， 使用beanDefinition.getPropertyValues().add()方法
 		PropertyValues pvs = (mbd.hasPropertyValues() ? mbd.getPropertyValues() : null);
 
+		// 获取注入模型值, 如果使用@Autowried注解，它的注入模型值也是默认值0
+		// no: 0
+		// byName : 1
+		// byType : 2
+		// constructor : 3
 		int resolvedAutowireMode = mbd.getResolvedAutowireMode();
 		if (resolvedAutowireMode == AUTOWIRE_BY_NAME || resolvedAutowireMode == AUTOWIRE_BY_TYPE) {
+			// by_name是根据根据属性名字找bean
+			// by_type是根据属性所对应的set方法的参数类型找bean
+			// 它们只是找的方式不一样而已, 找到bean之后都要调用set方法进行注入
+
+			// 定义一个变量接收属性名与属性值
 			MutablePropertyValues newPvs = new MutablePropertyValues(pvs);
 			// Add property values based on autowire by name if applicable.
 			if (resolvedAutowireMode == AUTOWIRE_BY_NAME) {
@@ -1422,7 +1444,17 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 				autowireByType(beanName, mbd, bw, newPvs);
 			}
 			pvs = newPvs;
+
+			// 需要注意的是, 这个方法中，仅仅是将属性的值找出来
+			// byName就是根据某个set方法(writeMethod)所对应的属性名去找bean
+			// byType就是根据某个set方法(writeMethod)的参数类型去找bean
+			// 注意，执行完这里的代码之后，这是把属性以及找到的值存在了pvs里面，并没有完成反射赋值
 		}
+
+
+		// 到这一步，spring的自动注入已经完成，构造方法注入在实例化bean的时候已经完成
+		// 这个方法的上半部分也完成了byType, byName的注入
+		// 接下来解析注解相关的注入， @Autowired, @Resource等
 
 		boolean hasInstAwareBpps = hasInstantiationAwareBeanPostProcessors();
 		boolean needsDepCheck = (mbd.getDependencyCheck() != AbstractBeanDefinition.DEPENDENCY_CHECK_NONE);
@@ -1432,6 +1464,9 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 			if (pvs == null) {
 				pvs = mbd.getPropertyValues();
 			}
+
+			// 5. 第五次调用后置处理器
+			// 核心功能： 完成属性注解相关的属性注入(需要注入的点已经在第三次后置处理器中找出来了)
 			for (BeanPostProcessor bp : getBeanPostProcessors()) {
 				if (bp instanceof InstantiationAwareBeanPostProcessor) {
 					InstantiationAwareBeanPostProcessor ibp = (InstantiationAwareBeanPostProcessor) bp;
@@ -1440,6 +1475,7 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 						if (filteredPds == null) {
 							filteredPds = filterPropertyDescriptorsForDependencyCheck(bw, mbd.allowCaching);
 						}
+						// 这个后置处理器方法大部分是过期方法, 先不看了
 						pvsToUse = ibp.postProcessPropertyValues(pvs, filteredPds, bw.getWrappedInstance(), beanName);
 						if (pvsToUse == null) {
 							return;
@@ -1457,6 +1493,8 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		if (pvs != null) {
+			// 将byType, byName依赖的值注入到需要注入的点中，完成属性填充
+			// 注解相关的已经在第五次后置处理器中完成了
 			applyPropertyValues(beanName, mbd, bw, pvs);
 		}
 	}
@@ -1513,7 +1551,21 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 		}
 
 		Set<String> autowiredBeanNames = new LinkedHashSet<>(4);
+
+		// 拿到所有需要注入的属性名字
+		// 注意： 其实拿到的是所有 set方法的名字， 方法必须是public并且带参
+		// 比如有一个方法 public void setXsy(XXX xx){}， 拿到的值就是"Xsy"
+		// spring希望的是一种标准写法，一个类中有一个需要赋值的属性，一个对应的set方法 如：
+		// public class Test{
+		//    private Xsy xxx;
+		//
+		//    public void setXsy(Xsy xxx){
+		//    		this.xxx = xxx
+		//    }
+		// }
+		// 类似这种标准的写法，但是实际上程序员怎么写是无法控制的。spring只会去找到set开头的方法，取其set后缀的值
 		String[] propertyNames = unsatisfiedNonSimpleProperties(mbd, bw);
+
 		for (String propertyName : propertyNames) {
 			try {
 				PropertyDescriptor pd = bw.getPropertyDescriptor(propertyName);
@@ -1556,11 +1608,20 @@ public abstract class AbstractAutowireCapableBeanFactory extends AbstractBeanFac
 	 */
 	protected String[] unsatisfiedNonSimpleProperties(AbstractBeanDefinition mbd, BeanWrapper bw) {
 		Set<String> result = new TreeSet<>();
+
+		// 属性值, 可以通过API在BeanDefinition中添加， 使用 BeanDefinition.getPropertyValues().add();
 		PropertyValues pvs = mbd.getPropertyValues();
+
+		// 拿到所有属性的描述， set方法后缀， 还有一个“class”,  “class”源于object中getClass, 取get后缀
 		PropertyDescriptor[] pds = bw.getPropertyDescriptors();
 		for (PropertyDescriptor pd : pds) {
 			if (pd.getWriteMethod() != null && !isExcludedFromDependencyCheck(pd) && !pvs.contains(pd.getName()) &&
 					!BeanUtils.isSimpleProperty(pd.getPropertyType())) {
+				// 排除条件：
+				// 1. 有set方法, 比如class, 是通过object中的getClass()获取的，只有get， 没有set， 所以会被排除
+				// 2. 没有通过DependencyCheck排除
+				// 3. 没有在BeanDefinition中给该属性赋值
+				// 4. 不能是简单类型
 				result.add(pd.getName());
 			}
 		}
